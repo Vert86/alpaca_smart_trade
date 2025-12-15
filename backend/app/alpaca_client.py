@@ -24,10 +24,22 @@ class AlpacaClient:
             paper=Config.is_paper_trading()
         )
 
-        self.data_client = StockHistoricalDataClient(
-            Config.ALPACA_API_KEY,
-            Config.ALPACA_SECRET_KEY
-        )
+        self.data_client = None
+        if not Config.use_yahoo_market_data():
+            self.data_client = StockHistoricalDataClient(
+                Config.ALPACA_API_KEY,
+                Config.ALPACA_SECRET_KEY
+            )
+
+    def _require_yfinance(self):
+        try:
+            import yfinance as yf  # type: ignore
+            return yf
+        except Exception as e:
+            raise Exception(
+                "Yahoo market data provider selected but 'yfinance' is not installed. "
+                "Install it with: pip install yfinance"
+            ) from e
 
     def get_account(self) -> Dict:
         """Get account information"""
@@ -110,6 +122,44 @@ class AlpacaClient:
             end = datetime.now()
             start = end - timedelta(days=days)
 
+            if Config.use_yahoo_market_data():
+                yf = self._require_yfinance()
+                interval_map = {
+                    '1Min': '1m',
+                    '5Min': '5m',
+                    '15Min': '15m',
+                    '1Hour': '60m',
+                    '1Day': '1d'
+                }
+                interval = interval_map.get(timeframe, '1d')
+
+                result: Dict[str, pd.DataFrame] = {}
+                for symbol in symbols:
+                    df = yf.download(
+                        tickers=symbol,
+                        start=start,
+                        end=end,
+                        interval=interval,
+                        progress=False,
+                        auto_adjust=False
+                    )
+                    if df is None or df.empty:
+                        continue
+
+                    normalized = pd.DataFrame(
+                        {
+                            'open': df['Open'],
+                            'high': df['High'],
+                            'low': df['Low'],
+                            'close': df['Close'],
+                            'volume': df['Volume'],
+                        }
+                    )
+                    normalized.index.name = 'timestamp'
+                    result[symbol] = normalized
+
+                return result
+
             # Map timeframe string to TimeFrame enum
             timeframe_map = {
                 '1Min': TimeFrame.Minute,
@@ -126,6 +176,8 @@ class AlpacaClient:
                 end=end
             )
 
+            if self.data_client is None:
+                raise Exception("Alpaca market data client not initialized")
             bars = self.data_client.get_stock_bars(request_params)
 
             # Convert to dictionary of DataFrames
@@ -154,7 +206,43 @@ class AlpacaClient:
     def get_latest_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
         """Get latest quote for symbols"""
         try:
+            if Config.use_yahoo_market_data():
+                yf = self._require_yfinance()
+                result: Dict[str, Dict] = {}
+                for symbol in symbols:
+                    ticker = yf.Ticker(symbol)
+                    price = None
+                    try:
+                        fi = getattr(ticker, "fast_info", None)
+                        if fi and "lastPrice" in fi and fi["lastPrice"] is not None:
+                            price = float(fi["lastPrice"])
+                    except Exception:
+                        price = None
+
+                    if price is None:
+                        try:
+                            hist = ticker.history(period="1d", interval="1m")
+                            if hist is not None and not hist.empty:
+                                price = float(hist["Close"].iloc[-1])
+                        except Exception:
+                            price = None
+
+                    if price is None:
+                        continue
+
+                    result[symbol] = {
+                        'bid_price': price,
+                        'bid_size': 0,
+                        'ask_price': price,
+                        'ask_size': 0,
+                        'timestamp': datetime.now()
+                    }
+
+                return result
+
             request_params = StockLatestQuoteRequest(symbol_or_symbols=symbols)
+            if self.data_client is None:
+                raise Exception("Alpaca market data client not initialized")
             quotes = self.data_client.get_stock_latest_quote(request_params)
 
             result = {}

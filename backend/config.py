@@ -18,6 +18,11 @@ class Config:
     # Telegram Configuration
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+    ENABLE_TELEGRAM = os.getenv('ENABLE_TELEGRAM', 'True').lower() == 'true'
+
+    # Market Data Configuration
+    # Options: 'alpaca' (default) or 'yahoo'
+    MARKET_DATA_PROVIDER = os.getenv('MARKET_DATA_PROVIDER', 'alpaca').strip().lower()
 
     # Flask Configuration
     FLASK_ENV = os.getenv('FLASK_ENV', 'development')
@@ -55,3 +60,7 @@ class Config:
     def is_paper_trading(cls):
         """Check if using paper trading"""
         return 'paper' in cls.ALPACA_BASE_URL.lower()
+
+    @classmethod
+    def use_yahoo_market_data(cls) -> bool:
+        return cls.MARKET_DATA_PROVIDER == 'yahoo'

@@ -3,8 +3,13 @@ Telegram Bot Integration
 Sends trading analysis and notifications to Telegram
 """
 import asyncio
-from telegram import Bot
-from telegram.error import TelegramError
+
+try:
+    from telegram import Bot
+    from telegram.error import TelegramError
+except Exception:  # pragma: no cover - optional dependency
+    Bot = None  # type: ignore
+    TelegramError = Exception  # type: ignore
 from typing import Dict, List
 from config import Config
 
@@ -14,16 +19,22 @@ class TelegramNotifier:
 
     def __init__(self):
         """Initialize Telegram bot"""
+        self.enabled = Config.ENABLE_TELEGRAM
         self.bot_token = Config.TELEGRAM_BOT_TOKEN
         self.chat_id = Config.TELEGRAM_CHAT_ID
         self.bot = None
 
-        if self.bot_token:
+        if self.enabled and self.bot_token and Bot is not None:
             self.bot = Bot(token=self.bot_token)
 
     def is_configured(self) -> bool:
         """Check if Telegram is properly configured"""
-        return self.bot_token is not None and self.chat_id is not None
+        return (
+            self.enabled
+            and self.bot is not None
+            and self.bot_token is not None
+            and self.chat_id is not None
+        )
 
     async def send_message(self, message: str) -> bool:
         """

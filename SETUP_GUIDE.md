@@ -42,6 +42,14 @@ ALPACA_BASE_URL=https://paper-api.alpaca.markets
 
 Save and close the file.
 
+## Optional: Use Yahoo Finance Market Data (Free)
+
+If you don't have access to Alpaca market data, you can fetch prices/history from Yahoo Finance:
+
+```env
+MARKET_DATA_PROVIDER=yahoo
+```
+
 ## Step 3: Frontend Setup
 
 ```bash
@@ -78,6 +86,12 @@ The app will automatically open at `http://localhost:3000`
 
 ## Optional: Set Up Telegram Notifications
 
+Telegram is optional. If you want it, install the extra dependency:
+
+```bash
+pip install python-telegram-bot==20.7
+```
+
 1. Open Telegram and search for `@BotFather`
 2. Send `/newbot` command
 3. Follow the prompts to create your bot
@@ -94,6 +108,15 @@ The app will automatically open at `http://localhost:3000`
 8. Restart the backend server
 
 Now you can send analysis reports to Telegram!
+
+## Optional: Interactive CLI Trading Prompt
+
+Run the interactive prompt (shows account + holdings, then lets you BUY/SELL from the default list):
+
+```bash
+cd backend
+python cli_trade.py
+```
 
 ## Quick Start Scripts
 
