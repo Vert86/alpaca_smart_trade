@@ -13,11 +13,12 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
     return null;
   }
 
-  const { buy_recommendations, sell_recommendations } = results.analysis;
-  const tradableRecommendations = [...buy_recommendations, ...sell_recommendations];
+  const { buy_recommendations, sell_recommendations, hold_recommendations } = results.analysis;
+  const recommendations = [...buy_recommendations, ...sell_recommendations, ...hold_recommendations];
 
   const handleExecute = async () => {
     if (!selectedStock) return;
+    if (selectedStock.action === 'HOLD') return;
 
     setExecuting(true);
     setTradeResult(null);
@@ -50,7 +51,7 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
     <div className="trading-panel">
       <h3>⚡ Trade Execution</h3>
 
-      {tradableRecommendations.length === 0 ? (
+      {recommendations.length === 0 ? (
         <div className="no-trades">
           <p>No tradable recommendations at this time</p>
         </div>
@@ -61,7 +62,7 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
             <select
               value={selectedStock?.symbol || ''}
               onChange={(e) => {
-                const stock = tradableRecommendations.find(r => r.symbol === e.target.value);
+                const stock = recommendations.find(r => r.symbol === e.target.value);
                 setSelectedStock(stock);
                 setCustomQuantity('');
                 setLimitPrice('');
@@ -69,7 +70,7 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
               }}
             >
               <option value="">-- Select a stock --</option>
-              {tradableRecommendations.map(rec => (
+              {recommendations.map(rec => (
                 <option key={rec.symbol} value={rec.symbol}>
                   {rec.symbol} - {rec.action} ({(rec.confidence * 100).toFixed(0)}% confidence)
                 </option>
@@ -87,15 +88,19 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
                     {selectedStock.action}
                   </span>
                 </div>
-                <div className="info-row">
-                  <span>Suggested Quantity:</span>
-                  <span>{selectedStock.position_size} shares</span>
-                </div>
-                {selectedStock.position_value > 0 && (
-                  <div className="info-row">
-                    <span>Estimated Value:</span>
-                    <span>${selectedStock.position_value.toLocaleString()}</span>
-                  </div>
+                {selectedStock.action !== 'HOLD' && (
+                  <>
+                    <div className="info-row">
+                      <span>Suggested Quantity:</span>
+                      <span>{selectedStock.position_size} shares</span>
+                    </div>
+                    {selectedStock.position_value > 0 && (
+                      <div className="info-row">
+                        <span>Estimated Value:</span>
+                        <span>${selectedStock.position_value.toLocaleString()}</span>
+                      </div>
+                    )}
+                  </>
                 )}
                 <div className="info-row">
                   <span>Confidence:</span>
@@ -103,7 +108,8 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
                 </div>
               </div>
 
-              <div className="trade-options">
+              {selectedStock.action !== 'HOLD' && (
+                <div className="trade-options">
                 <div className="form-group">
                   <label>Order Type:</label>
                   <div className="radio-group">
@@ -151,6 +157,7 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
                   />
                 </div>
               </div>
+              )}
 
               {tradeResult && (
                 <div className={`trade-result ${tradeResult.success ? 'success' : 'error'}`}>
@@ -179,9 +186,15 @@ function TradingPanel({ results, onExecuteTrade, onRefresh }) {
                 <button
                   className="btn btn-execute"
                   onClick={handleExecute}
-                  disabled={executing || (orderType === 'limit' && !limitPrice)}
+                  disabled={
+                    executing ||
+                    selectedStock.action === 'HOLD' ||
+                    (orderType === 'limit' && !limitPrice)
+                  }
                 >
-                  {executing ? 'Executing...' : `Execute ${selectedStock.action}`}
+                  {selectedStock.action === 'HOLD'
+                    ? 'No Trade (HOLD)'
+                    : (executing ? 'Executing...' : `Execute ${selectedStock.action}`)}
                 </button>
                 <button
                   className="btn btn-cancel"

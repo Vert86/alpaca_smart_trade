@@ -8,7 +8,7 @@ scipy==1.11.4
 
 # Technical Analysis
 ta==0.11.0
-pandas-ta==0.3.14b0
+# pandas-ta is currently unavailable from its original upstream; this project uses `ta` for indicators.
 yfinance==0.2.65
 
 # API Framework

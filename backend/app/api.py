@@ -132,6 +132,12 @@ def analyze_stocks():
         account = alpaca_client.get_account()
         positions = alpaca_client.get_positions()
 
+        # Get latest quotes for risk sizing and better decisions
+        try:
+            quotes = alpaca_client.get_latest_quotes(symbols)
+        except Exception:
+            quotes = {}
+
         # Fetch historical data
         print(f"Fetching historical data for {len(symbols)} symbols...")
         historical_data = alpaca_client.get_historical_bars(
@@ -159,7 +165,8 @@ def analyze_stocks():
             risk_summary=risk_summary,
             positions=positions,
             account=account,
-            risk_manager=risk_manager
+            risk_manager=risk_manager,
+            quotes=quotes
         )
 
         # Add detailed breakdown for each symbol
@@ -180,6 +187,7 @@ def analyze_stocks():
                 'regime_analysis': regime,
                 'walk_forward_analysis': wf,
                 'current_position': position,
+                'latest_quote': quotes.get(symbol, {}),
                 'recommendation': recommendation
             })
 

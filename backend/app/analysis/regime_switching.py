@@ -30,7 +30,18 @@ class RegimeSwitchingAnalyzer:
         Returns:
             Dictionary with regime analysis results
         """
-        if df is None or len(df) < max(self.sma_periods):
+        if df is None or len(df) < 20:
+            return {
+                'regime': 'UNKNOWN',
+                'confidence': 0.0,
+                'trend_strength': 0.0,
+                'volatility': 0.0,
+                'indicators': {}
+            }
+
+        # Use only SMA periods that are feasible with available data
+        effective_periods = [p for p in self.sma_periods if p <= len(df)]
+        if not effective_periods:
             return {
                 'regime': 'UNKNOWN',
                 'confidence': 0.0,
@@ -40,7 +51,7 @@ class RegimeSwitchingAnalyzer:
             }
 
         # Calculate technical indicators
-        indicators = self._calculate_indicators(df)
+        indicators = self._calculate_indicators(df, sma_periods=effective_periods)
 
         # Determine regime
         regime_score = self._calculate_regime_score(indicators)
@@ -81,7 +92,7 @@ class RegimeSwitchingAnalyzer:
             }
         }
 
-    def _calculate_indicators(self, df: pd.DataFrame) -> Dict:
+    def _calculate_indicators(self, df: pd.DataFrame, sma_periods: List[int]) -> Dict:
         """Calculate technical indicators"""
         indicators = {}
         close = df['close']
@@ -89,7 +100,7 @@ class RegimeSwitchingAnalyzer:
         low = df['low']
 
         # Simple Moving Averages
-        for period in self.sma_periods:
+        for period in sma_periods:
             if len(df) >= period:
                 indicators[f'sma_{period}'] = close.rolling(window=period).mean().iloc[-1]
 

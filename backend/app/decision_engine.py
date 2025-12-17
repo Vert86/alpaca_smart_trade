@@ -11,6 +11,8 @@ class DecisionEngine:
 
     def __init__(self):
         """Initialize decision engine"""
+        self.buy_threshold = 0.15
+        self.sell_threshold = -0.15
         # Weights for different analysis methods
         self.weights = {
             'regime_switching': 0.4,
@@ -52,9 +54,9 @@ class DecisionEngine:
         )
 
         # Determine final action
-        if combined_score > 0.3:
+        if combined_score > self.buy_threshold:
             action = 'BUY'
-        elif combined_score < -0.3:
+        elif combined_score < self.sell_threshold:
             action = 'SELL'
         else:
             action = 'HOLD'
@@ -120,7 +122,7 @@ class DecisionEngine:
             'regime': regime,
             'confidence': confidence,
             'trend_strength': trend_strength,
-            'recommendation': 'BUY' if score > 0.3 else ('SELL' if score < -0.3 else 'HOLD')
+            'recommendation': 'BUY' if score > 0.2 else ('SELL' if score < -0.2 else 'HOLD')
         }
 
     def _interpret_walk_forward(self, analysis: Dict) -> Dict:
@@ -160,16 +162,11 @@ class DecisionEngine:
         reason = risk_eval.get('reason', '')
         warnings = risk_eval.get('warnings', [])
 
-        # Risk is binary: either approved or not
-        # But we can modulate based on warnings
+        # Risk should only penalize; it should not create a BUY/SELL signal by itself.
         if not approved:
             score = -1.0  # Block the trade
-        elif len(warnings) > 2:
-            score = -0.5  # Multiple warnings, be cautious
-        elif len(warnings) > 0:
-            score = 0.0  # Some concerns
         else:
-            score = 0.5  # All clear
+            score = -0.2 if len(warnings) > 0 else 0.0
 
         return {
             'score': score,
@@ -316,7 +313,8 @@ class DecisionEngine:
         risk_summary: Dict,
         positions: List[Dict],
         account: Dict,
-        risk_manager
+        risk_manager,
+        quotes: Dict[str, Dict] = None
     ) -> Dict:
         """
         Analyze entire portfolio and generate recommendations
@@ -334,22 +332,51 @@ class DecisionEngine:
             Portfolio analysis with recommendations for each symbol
         """
         recommendations = []
-        current_price_map = {}  # You'd get this from latest quotes
+        quotes = quotes or {}
 
         for symbol in symbols:
             # Get current position if any
             current_position = next((p for p in positions if p['symbol'] == symbol), None)
             current_price = current_position['current_price'] if current_position else 0
 
+            # If not held, use latest quote data (ask/bid) for risk sizing and decisions
+            if (not current_price) and symbol in quotes:
+                bid = float(quotes[symbol].get('bid_price', 0) or 0)
+                ask = float(quotes[symbol].get('ask_price', 0) or 0)
+                if bid and ask:
+                    current_price = (bid + ask) / 2.0
+                else:
+                    current_price = ask or bid or 0
+
             # Get analysis results
             regime = regime_results.get(symbol, {})
             wf = wf_results.get(symbol, {})
 
-            # Get recommendation from walk-forward or regime
-            action = wf.get('recommendation', 'HOLD')
+            # Provisional recommendation based on technical analysis only (no risk boost)
+            regime_rec = self._interpret_regime(regime)
+            wf_rec = self._interpret_walk_forward(wf)
+            technical_score = (
+                regime_rec['score'] * self.weights['regime_switching'] +
+                wf_rec['score'] * self.weights['walk_forward']
+            )
+
+            if technical_score > self.buy_threshold:
+                action = 'BUY'
+            elif technical_score < self.sell_threshold:
+                action = 'SELL'
+            else:
+                action = 'HOLD'
 
             # Evaluate risk for this trade
-            if current_price > 0:
+            if action == 'HOLD':
+                risk_eval = {
+                    'approved': True,
+                    'reason': 'No trade suggested (HOLD)',
+                    'warnings': [],
+                    'position_size': 0,
+                    'position_value': 0.0,
+                }
+            elif current_price > 0:
                 risk_eval = risk_manager.evaluate_trade(
                     symbol,
                     action,

@@ -146,15 +146,31 @@ class AlpacaClient:
                     if df is None or df.empty:
                         continue
 
-                    normalized = pd.DataFrame(
-                        {
-                            'open': df['Open'],
-                            'high': df['High'],
-                            'low': df['Low'],
-                            'close': df['Close'],
-                            'volume': df['Volume'],
-                        }
-                    )
+                    df_symbol = df
+                    if isinstance(df_symbol.columns, pd.MultiIndex):
+                        # Typical shape: (field, ticker)
+                        try:
+                            if symbol in df_symbol.columns.get_level_values(-1):
+                                df_symbol = df_symbol.xs(symbol, level=-1, axis=1)
+                            elif symbol in df_symbol.columns.get_level_values(0):
+                                df_symbol = df_symbol[symbol]
+                            else:
+                                df_symbol = df_symbol.copy()
+                                df_symbol.columns = [c[0] for c in df_symbol.columns]
+                        except Exception:
+                            df_symbol = df_symbol.copy()
+                            df_symbol.columns = [c[0] for c in df_symbol.columns]
+
+                    # Normalize columns to our expected lowercase schema
+                    col_lookup = {str(c).lower(): c for c in df_symbol.columns}
+                    required = ["open", "high", "low", "close", "volume"]
+                    missing = [c for c in required if c not in col_lookup]
+                    if missing:
+                        continue
+
+                    normalized = df_symbol.rename(
+                        columns={col_lookup[c]: c for c in required}
+                    )[required].copy()
                     normalized.index.name = 'timestamp'
                     result[symbol] = normalized
 

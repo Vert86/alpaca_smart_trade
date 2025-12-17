@@ -45,8 +45,12 @@ class WalkForwardOptimizer:
         # Perform walk-forward optimization
         results = self._walk_forward_analysis(df)
 
-        # Generate recommendation based on results
-        recommendation = self._generate_recommendation(results)
+        # Generate a current (as-of-latest-bar) technical signal from optimized params.
+        # This prevents "always HOLD" when the walk-forward backtest window is too small to generate trades.
+        current_signal = self._generate_current_signal(df, results.get('optimal_params') or {})
+
+        # Generate recommendation based on results (fallbacks to current signal when needed)
+        recommendation = self._generate_recommendation(results, current_signal=current_signal)
 
         return {
             'recommendation': recommendation['action'],
@@ -57,7 +61,8 @@ class WalkForwardOptimizer:
             'max_drawdown': round(results['max_drawdown'], 3),
             'avg_return': round(results['avg_return'], 4),
             'optimal_params': results['optimal_params'],
-            'recent_performance': results['recent_performance']
+            'recent_performance': results['recent_performance'],
+            'current_signal': current_signal
         }
 
     def _walk_forward_analysis(self, df: pd.DataFrame) -> Dict:
@@ -78,9 +83,10 @@ class WalkForwardOptimizer:
         train_data = df.iloc[-(self.train_days + self.test_days):-self.test_days]
         optimal_params = self._optimize_parameters(train_data)
 
-        # Test on out-of-sample data
-        test_data = df.iloc[-self.test_days:]
-        test_results = self._backtest_strategy(test_data, optimal_params)
+        # Test on out-of-sample data; include enough warm-up history so rolling indicators work
+        warmup = max(optimal_params.get('slow_ma', 30), optimal_params.get('rsi_period', 14))
+        test_slice = df.iloc[-(self.test_days + warmup):] if len(df) > (self.test_days + warmup) else df
+        test_results = self._backtest_strategy(test_slice, optimal_params, evaluation_start=-self.test_days)
 
         # Calculate overall performance metrics
         all_trades = test_results['trades']
@@ -169,7 +175,7 @@ class WalkForwardOptimizer:
             'rsi_overbought': 70
         }
 
-    def _backtest_strategy(self, df: pd.DataFrame, params: Dict) -> Dict:
+    def _backtest_strategy(self, df: pd.DataFrame, params: Dict, evaluation_start: int = 0) -> Dict:
         """
         Backtest a strategy with given parameters
 
@@ -216,7 +222,12 @@ class WalkForwardOptimizer:
         trades = []
         position = None
 
+        start_idx = evaluation_start if evaluation_start >= 0 else max(0, len(df) + evaluation_start)
+
         for i in range(len(df)):
+            if i < start_idx:
+                continue
+
             if df['signal'].iloc[i] == 1 and position is None:
                 # Buy
                 position = {
@@ -255,7 +266,59 @@ class WalkForwardOptimizer:
             'total_return': total_return
         }
 
-    def _generate_recommendation(self, results: Dict) -> Dict:
+    def _generate_current_signal(self, df: pd.DataFrame, params: Dict) -> Dict:
+        """
+        Generate a simple as-of-latest-bar signal using optimized parameters.
+        """
+        try:
+            fast = int(params.get('fast_ma', 10))
+            slow = int(params.get('slow_ma', 30))
+            rsi_period = int(params.get('rsi_period', 14))
+            rsi_overbought = float(params.get('rsi_overbought', 70))
+            rsi_oversold = float(params.get('rsi_oversold', 30))
+
+            if len(df) < max(slow, rsi_period) + 2:
+                return {'action': 'HOLD', 'confidence': 0.0}
+
+            close = df['close']
+            fast_ma = close.rolling(window=fast).mean().iloc[-1]
+            slow_ma = close.rolling(window=slow).mean().iloc[-1]
+
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
+            rs = gain / loss
+            rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+
+            if slow_ma and close.iloc[-1]:
+                ma_diff_pct = float((fast_ma - slow_ma) / close.iloc[-1])
+            else:
+                ma_diff_pct = 0.0
+
+            if fast_ma > slow_ma and rsi < rsi_overbought:
+                action = 'BUY'
+                confidence = min(abs(ma_diff_pct) * 8.0 + max(0.0, (50 - rsi) / 100.0), 1.0)
+            elif fast_ma < slow_ma or rsi > rsi_overbought:
+                action = 'SELL'
+                confidence = min(abs(ma_diff_pct) * 8.0 + max(0.0, (rsi - 50) / 100.0), 1.0)
+            elif rsi < rsi_oversold:
+                action = 'BUY'
+                confidence = min((rsi_oversold - rsi) / 100.0, 0.6)
+            else:
+                action = 'HOLD'
+                confidence = min(abs(ma_diff_pct) * 4.0, 0.4)
+
+            return {
+                'action': action,
+                'confidence': float(confidence),
+                'fast_ma': float(fast_ma),
+                'slow_ma': float(slow_ma),
+                'rsi': float(rsi),
+            }
+        except Exception:
+            return {'action': 'HOLD', 'confidence': 0.0}
+
+    def _generate_recommendation(self, results: Dict, current_signal: Dict) -> Dict:
         """
         Generate trading recommendation based on optimization results
 
@@ -302,7 +365,12 @@ class WalkForwardOptimizer:
         elif expected_return < -0.02 and sharpe < 0 and win_rate < 0.4:
             action = 'SELL'
         else:
-            action = 'HOLD'
+            # If the backtest produced no trades (or tiny window), fall back to current signal.
+            if results.get('num_trades', 0) == 0 and current_signal:
+                action = current_signal.get('action', 'HOLD')
+                confidence = max(confidence, float(current_signal.get('confidence', 0.0)))
+            else:
+                action = 'HOLD'
 
         return {
             'action': action,
